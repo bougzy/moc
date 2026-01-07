@@ -26,7 +26,7 @@ for (const envVar of requiredEnvVars) {
 
 // Use explicit redirect URI or default
 const GOOGLE_REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI || 
-  `https://moc-iklj.onrender.com/auth/callback`;
+  `https://moc-iklj.onrender.com/auth/google/callback`;
 
 console.log('🔧 Configuration:');
 console.log(`   Port: ${PORT}`);
