@@ -10,7 +10,6 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 // ========== ENVIRONMENT VALIDATION ==========
-// Validate required environment variables
 const requiredEnvVars = [
   'GOOGLE_CLIENT_ID',
   'GOOGLE_CLIENT_SECRET',
@@ -24,9 +23,9 @@ for (const envVar of requiredEnvVars) {
   }
 }
 
-// Use explicit redirect URI or default
+// IMPORTANT: This MUST match exactly what's in Google Cloud Console
 const GOOGLE_REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI || 
-  `https://moc-iklj.onrender.com/auth/google/callback`;
+  `https://moc-iklj.onrender.com/auth/callback`; // Changed to /auth/callback
 
 console.log('🔧 Configuration:');
 console.log(`   Port: ${PORT}`);
@@ -34,18 +33,17 @@ console.log(`   Frontend URL: ${process.env.FRONTEND_URL}`);
 console.log(`   Google Redirect URI: ${GOOGLE_REDIRECT_URI}`);
 
 // ========== SESSION CONFIGURATION ==========
-// Configure secure session management
 app.use(session({
   secret: process.env.SESSION_SECRET || 'temporary-development-secret-change-in-production',
   resave: false,
   saveUninitialized: false,
   cookie: {
-    secure: true, // Render uses HTTPS, so this should be true
-    httpOnly: true, // Prevent client-side JS from accessing the cookie
-    maxAge: 24 * 60 * 60 * 1000, // 24 hours
-    sameSite: 'lax' // Use 'lax' for cross-origin requests
+    secure: true, // Render uses HTTPS
+    httpOnly: true,
+    maxAge: 24 * 60 * 60 * 1000,
+    sameSite: 'lax'
   },
-  name: 'google-oauth-session' // Custom session cookie name
+  name: 'google-oauth-session'
 }));
 
 // ========== PASSPORT INITIALIZATION ==========
@@ -70,10 +68,12 @@ passport.deserializeUser((obj, done) => {
 passport.use(new GoogleStrategy({
     clientID: process.env.GOOGLE_CLIENT_ID,
     clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-    callbackURL: GOOGLE_REDIRECT_URI,
+    callbackURL: GOOGLE_REDIRECT_URI, // This matches Google Cloud Console
     passReqToCallback: false
   },
   (accessToken, refreshToken, profile, done) => {
+    console.log('📨 Google OAuth callback received:', profile.id);
+    
     const user = {
       id: profile.id,
       displayName: profile.displayName,
@@ -95,13 +95,15 @@ app.use(express.json());
 
 // CORS configuration
 app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  
+  // Allow multiple origins
   const allowedOrigins = [
     'https://mc-opal.vercel.app',
     'http://localhost:3000',
-    'http://localhost:5173'
+    'http://localhost:5173',
+    'https://moc-iklj.onrender.com'
   ];
-  
-  const origin = req.headers.origin;
   
   if (allowedOrigins.includes(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
@@ -120,7 +122,7 @@ app.use((req, res, next) => {
 
 // Request logger
 app.use((req, res, next) => {
-  console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
+  console.log(`${new Date().toISOString()} - ${req.method} ${req.path} - Origin: ${req.headers.origin || 'none'}`);
   next();
 });
 
@@ -131,137 +133,53 @@ app.get('/health', (req, res) => {
   res.json({ 
     status: 'healthy', 
     timestamp: new Date().toISOString(),
-    service: 'google-oauth-backend'
+    service: 'google-oauth-backend',
+    routes: [
+      '/auth/google',
+      '/auth/callback',
+      '/auth/me',
+      '/auth/logout'
+    ]
   });
-});
-
-// OPTION 1: If you want to keep the route as /auth/google/callback
-// Add a redirect from /auth/callback to /auth/google/callback
-app.get('/auth/callback', (req, res) => {
-  // Redirect to the correct callback endpoint
-  res.redirect('/auth/google/callback');
 });
 
 // 1. Initiate Google OAuth login
 app.get('/auth/google',
   passport.authenticate('google', {
     scope: ['profile', 'email'],
-    prompt: 'select_account',
+    prompt: 'consent', // Changed from 'select_account' to 'consent'
     accessType: 'offline'
   })
 );
 
-// 2. Handle Google OAuth callback
-app.get('/auth/google/callback',
+// 2. Handle Google OAuth callback - THIS IS THE FIXED ROUTE
+// Changed from /auth/google/callback to /auth/callback
+app.get('/auth/callback',
   passport.authenticate('google', { 
-    failureRedirect: `${process.env.FRONTEND_URL}/login?error=auth_failed`,
+    failureRedirect: `${process.env.FRONTEND_URL}?error=auth_failed`,
     failureMessage: true
   }),
   (req, res) => {
-    console.log(`✅ Authentication successful for user: ${req.user.email || req.user.displayName}`);
+    console.log(`🎉 Authentication successful! User: ${req.user.email || req.user.displayName}`);
     
-    // Create a simple success page for testing
-    res.send(`
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>Authentication Successful</title>
-        <style>
-          body {
-            font-family: Arial, sans-serif;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            height: 100vh;
-            margin: 0;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-          }
-          .container {
-            background: white;
-            padding: 2rem;
-            border-radius: 10px;
-            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
-            text-align: center;
-            max-width: 500px;
-          }
-          .success-icon {
-            color: #10B981;
-            font-size: 4rem;
-            margin-bottom: 1rem;
-          }
-          h1 {
-            color: #1F2937;
-            margin-bottom: 1rem;
-          }
-          p {
-            color: #6B7280;
-            margin-bottom: 2rem;
-          }
-          .user-info {
-            background: #F3F4F6;
-            padding: 1rem;
-            border-radius: 5px;
-            margin-bottom: 2rem;
-            text-align: left;
-          }
-          .btn {
-            display: inline-block;
-            background: #3B82F6;
-            color: white;
-            padding: 0.75rem 1.5rem;
-            border-radius: 5px;
-            text-decoration: none;
-            font-weight: 500;
-            transition: background 0.3s;
-          }
-          .btn:hover {
-            background: #2563EB;
-          }
-        </style>
-      </head>
-      <body>
-        <div class="container">
-          <div class="success-icon">✓</div>
-          <h1>Authentication Successful!</h1>
-          <p>You have successfully logged in with Google.</p>
-          
-          <div class="user-info">
-            <p><strong>Name:</strong> ${req.user.displayName}</p>
-            <p><strong>Email:</strong> ${req.user.email}</p>
-          </div>
-          
-          <a href="${process.env.FRONTEND_URL}" class="btn">Go to Frontend</a>
-          
-          <script>
-            // Store user info in localStorage and redirect
-            localStorage.setItem('user', JSON.stringify({
-              id: '${req.user.id}',
-              displayName: '${req.user.displayName}',
-              email: '${req.user.email}',
-              picture: '${req.user.picture}',
-              authenticated: true
-            }));
-            
-            // Redirect after 3 seconds
-            setTimeout(() => {
-              window.location.href = '${process.env.FRONTEND_URL}';
-            }, 3000);
-          </script>
-        </div>
-      </body>
-      </html>
-    `);
+    // For now, redirect to frontend - frontend should handle storing the session
+    res.redirect(`${process.env.FRONTEND_URL}/dashboard?auth=success`);
   }
 );
 
 // 3. Get current user info (protected route)
 app.get('/auth/me', (req, res) => {
+  console.log('🔍 Checking authentication status for session:', req.sessionID);
+  
   if (!req.isAuthenticated()) {
+    console.log('❌ User not authenticated');
     return res.status(401).json({ 
       error: 'Not authenticated',
       authenticated: false 
     });
   }
+  
+  console.log('✅ User authenticated:', req.user.email);
   
   const safeUser = {
     id: req.user.id,
@@ -277,11 +195,12 @@ app.get('/auth/me', (req, res) => {
 // 4. Logout endpoint
 app.post('/auth/logout', (req, res) => {
   if (req.isAuthenticated()) {
-    console.log(`👋 User logged out: ${req.user.email || req.user.displayName}`);
+    console.log(`👋 User logging out: ${req.user.email || req.user.displayName}`);
   }
   
   req.logout((err) => {
     if (err) {
+      console.error('Logout error:', err);
       return res.status(500).json({ error: 'Logout failed' });
     }
     
@@ -296,19 +215,14 @@ app.post('/auth/logout', (req, res) => {
   });
 });
 
-// Debug endpoint to see all routes
-app.get('/debug/routes', (req, res) => {
-  const routes = [];
-  app._router.stack.forEach((middleware) => {
-    if (middleware.route) {
-      routes.push({
-        path: middleware.route.path,
-        methods: Object.keys(middleware.route.methods)
-      });
-    }
+// Debug endpoint to check session
+app.get('/debug/session', (req, res) => {
+  res.json({
+    sessionID: req.sessionID,
+    session: req.session,
+    authenticated: req.isAuthenticated(),
+    user: req.user || null
   });
-  
-  res.json({ routes });
 });
 
 // ========== ERROR HANDLING ==========
@@ -320,7 +234,14 @@ app.use((req, res) => {
     error: 'Not found',
     path: req.path,
     method: req.method,
-    availableRoutes: ['/health', '/auth/google', '/auth/google/callback', '/auth/callback', '/auth/me', '/auth/logout', '/debug/routes']
+    availableRoutes: [
+      '/health',
+      '/auth/google',
+      '/auth/callback', // This is now the correct route
+      '/auth/me',
+      '/auth/logout',
+      '/debug/session'
+    ]
   });
 });
 
@@ -333,37 +254,36 @@ app.use((err, req, res, next) => {
   
   res.status(statusCode).json({
     error: message,
-    ...(process.env.NODE_ENV !== 'production' && { stack: err.stack })
+    path: req.path,
+    timestamp: new Date().toISOString()
   });
 });
 
 // ========== SERVER STARTUP ==========
 app.listen(PORT, () => {
   console.log(`
-🚀 Server is running!
-📍 Port: ${PORT}
+🚀 Server is running on Render!
+📍 URL: https://moc-iklj.onrender.com
+🔧 Port: ${PORT}
 🌐 Frontend URL: ${process.env.FRONTEND_URL}
-🔐 Google OAuth configured with Client ID: ${process.env.GOOGLE_CLIENT_ID?.substring(0, 15)}...
+🔐 Google OAuth Client ID: ${process.env.GOOGLE_CLIENT_ID?.substring(0, 20)}...
 🔄 Callback URL: ${GOOGLE_REDIRECT_URI}
 
 📋 Available endpoints:
    GET  /health
-   GET  /auth/google
-   GET  /auth/google/callback
-   GET  /auth/callback (redirects to /auth/google/callback)
-   GET  /auth/me
-   POST /auth/logout
-   GET  /debug/routes
+   GET  /auth/google           ← Start OAuth flow
+   GET  /auth/callback         ← Google redirects here (MUST match Google Cloud Console)
+   GET  /auth/me               ← Check if user is authenticated
+   POST /auth/logout           ← Log out user
+   GET  /debug/session         ← Debug session info
+
+⚠️  IMPORTANT: Make sure Google Cloud Console has this exact callback URL:
+   ${GOOGLE_REDIRECT_URI}
   `);
 });
 
 // Graceful shutdown
 process.on('SIGTERM', () => {
   console.log('SIGTERM received. Shutting down gracefully...');
-  process.exit(0);
-});
-
-process.on('SIGINT', () => {
-  console.log('SIGINT received. Shutting down gracefully...');
   process.exit(0);
 });
